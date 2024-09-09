@@ -1,0 +1,172 @@
+package com.web;
+
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+
+import java.io.File;
+import java.sql.Date;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+
+@Controller
+@RequestMapping("/board")
+public class BoardController {
+
+    @Autowired
+    private BoardService boardService;
+
+    @GetMapping("")
+    public String index(Model model) {
+        return "th/index";
+    }
+
+    @GetMapping("/addForm")
+    public String add(Model model) {
+
+        return "th/addForm";
+    }
+
+    @PostMapping("/addForm")
+    public String add(@RequestParam("title") String title, @RequestParam("author") String author, @RequestParam("contents") String contents, @RequestParam(value="files", required = false) MultipartFile[] files,
+                      RedirectAttributes redirectAttributes) {
+        Board board = new Board();
+        board.setTitle(title);
+        board.setAuthor(author);
+        board.setContents(contents);
+        board.setRdate(new java.sql.Date(System.currentTimeMillis()));
+
+        List<Attach> att = new ArrayList<>();
+        if (files != null) {
+            for (MultipartFile file : files) {
+                System.out.println("파일 이름: " + file.getOriginalFilename()); // 파일 정보 확인
+                if (!file.isEmpty()) {
+                    // 파일 저장 경로 설정
+                    String uploadDir = "C:/upload/";
+                    File uploadDirFile = new File(uploadDir);
+                    if (!uploadDirFile.exists()) {
+                        uploadDirFile.mkdirs(); // 디렉토리 생성
+                    }
+
+                    // 파일 저장
+                    try {
+                        File savedFile = new File(uploadDir + file.getOriginalFilename());
+                        file.transferTo(savedFile);
+                        Attach attach = new Attach();
+                        attach.setFname(file.getOriginalFilename());
+                        attach.setFsize(file.getSize());
+                        attach.setDownloads(0);
+                        att.add(attach);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+
+        boardService.addBoardWithAttachments(board, att);
+
+        return "redirect:/board/list";
+    }
+
+    @GetMapping("/list")
+    public String list(Model model) {
+        List<Board> list=boardService.getBoardList();
+        model.addAttribute("list", list);
+        return "th/list";
+    }
+
+    @GetMapping("/detail/{bid}")
+    public String detail(@PathVariable("bid") int bid, Model model) {
+        Board board=boardService.boardDetail(bid);
+        List<Attach> attachments=boardService.attachDetail(bid);
+        model.addAttribute("board", board);
+        model.addAttribute("attachments", attachments);
+        return "th/boardDetail";
+    }
+
+    //실제로 다운안됨
+    @GetMapping("/downloadFile/{fid}")
+    public ResponseEntity<Resource> downloadFile(@PathVariable("fid") int fid) {
+        Attach attach = boardService.getAttachById(fid);
+        if (attach == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 저장된 파일 경로 확인
+        File file = new File("C:/upload/" + attach.getFname());
+        if (!file.exists()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 리소스 생성
+        Resource resource = new FileSystemResource(file);
+
+        // 파일 다운로드를 위한 HTTP 헤더 설정
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + attach.getFname() + "\"")
+                .body(resource);
+    }
+
+    @GetMapping("/update/{bid}")
+    public String updateBoard(@PathVariable("bid")int bid, Model model) {
+        Board board= boardService.boardDetail(bid);
+       model.addAttribute("board", board);
+        return "th/updateBoard";
+    }
+    @PostMapping("/update/{bid}")
+    @ResponseBody
+    public Map<String, Boolean> updateBoard(@PathVariable("bid") int bid,
+                                            @RequestParam("title") String title,
+                                            @RequestParam("contents") String contents) {
+        Map<String, Boolean> map = new HashMap<>();
+        Board board = new Board();
+        board.setBid(bid);
+        board.setTitle(title);
+        board.setContents(contents);
+        // 기타 설정
+
+        boolean updated = boardService.updateBoard(board);
+        System.out.println("수정결과:"+updated);
+        map.put("updated", updated);
+        return map;
+    }
+    @GetMapping("/search")
+    public String searchBoards(@RequestParam("searchType") String searchType,
+                               @RequestParam("keyword") String keyword,
+                               Model model) {
+        List<Board> boards = boardService.searchBoards(searchType, keyword);
+        model.addAttribute("list", boards); // 검색 결과를 목록 페이지로 전달
+        return "th/list"; // 검색 결과를 표시할 페이지로 이동
+    }
+
+    @PostMapping("/delete/{bid}")
+    @ResponseBody
+    public Map<String, Boolean> deleteBoard(@PathVariable("bid") int bid) {
+        Map<String, Boolean> map = new HashMap<>();
+        boolean deleted1=boardService.deleteAttach(bid);
+        boolean deleted2=boardService.deleteBoard(bid);
+        boolean deleted= deleted1 &&deleted2;
+        map.put("deleted", deleted);
+        return map;
+    }
+    @PostMapping("/deleteAttach/{fid}")
+    @ResponseBody
+    public Map<String, Boolean> deleteAttach(@PathVariable("fid") int fid) {
+        Map<String, Boolean> map = new HashMap<>();
+        boolean deleted=boardService.deleteAttachByfid(fid);
+        map.put("deleted", deleted);
+        return map;
+    }
+}
